@@ -1,0 +1,542 @@
+<html><head><base href="https://cat-flapper.example.com/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flappy Cat</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: linear-gradient(to bottom, #87CEEB, #E0F6FF);
+        font-family: 'Comic Sans MS', cursive, sans-serif;
+        overflow: hidden;
+    }
+    #gameCanvas {
+        display: none;
+        width: 100%;
+        height: 100%;
+    }
+    #mainMenu, #gameOverMenu {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+        max-width: 90%;
+        width: 300px;
+    }
+    h1 {
+        color: #FFA500;
+        font-size: 48px;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px #333;
+    }
+    #studioNames {
+        color: #333;
+        font-size: 18px;
+        margin-top: -15px;
+        margin-bottom: 20px;
+        font-style: italic;
+    }
+    button {
+        background-color: #4CAF50;
+        border: none;
+        color: white;
+        padding: 15px 32px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 12px;
+        transition: background-color 0.3s;
+    }
+    button:hover {
+        background-color: #45a049;
+    }
+    #catSvg {
+        width: 100px;
+        height: 100px;
+        margin: 20px 0;
+    }
+    #highScores {
+        margin-top: 20px;
+    }
+    #highScores h2 {
+        color: #FFA500;
+    }
+    #scoreList {
+        list-style-type: none;
+        padding: 0;
+    }
+    #scoreList li {
+        margin: 5px 0;
+        font-size: 18px;
+    }
+    @media (max-height: 600px) {
+        h1 {
+            font-size: 36px;
+        }
+        #catSvg {
+            width: 80px;
+            height: 80px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+    }
+</style>
+</head>
+<body>
+<div id="mainMenu">
+    <h1>Flappy Cat</h1>
+    <p id="studioNames">TimiStudio x WNDS studio</p>
+    <svg id="catSvg" viewBox="0 0 100 100">
+        <ellipse cx="50" cy="50" rx="40" ry="30" fill="#FFA500"/>
+        <polygon points="10,50 20,40 30,50" fill="#FFA500"/>
+        <polygon points="70,50 80,40 90,50" fill="#FFA500"/>
+        <circle cx="70" cy="40" r="5" fill="#000"/>
+        <circle cx="30" cy="40" r="5" fill="#000"/>
+        <path d="M 60 60 Q 50 70 40 60" stroke="#000" stroke-width="2" fill="none"/>
+    </svg>
+    <p>Help the cat navigate through the pipes!</p>
+    <button id="startButton">Start Game</button>
+    <div id="highScores">
+        <h2>High Scores</h2>
+        <ul id="scoreList"></ul>
+    </div>
+</div>
+<canvas id="gameCanvas"></canvas>
+<div id="gameOverMenu">
+    <h2>Game Over</h2>
+    <p>Your Score: <span id="finalScore"></span></p>
+    <p>High Score: <span id="highScore"></span></p>
+    <button id="restartButton">Play Again</button>
+    <button id="mainMenuButton">Main Menu</button>
+</div>
+<audio id="tapSound" src="https://example.com/tap-sound.mp3" preload="auto"></audio>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const mainMenu = document.getElementById('mainMenu');
+const gameOverMenu = document.getElementById('gameOverMenu');
+const startButton = document.getElementById('startButton');
+const restartButton = document.getElementById('restartButton');
+const mainMenuButton = document.getElementById('mainMenuButton');
+const finalScoreSpan = document.getElementById('finalScore');
+const highScoreSpan = document.getElementById('highScore');
+const scoreList = document.getElementById('scoreList');
+
+let highScores = JSON.parse(localStorage.getItem('flappyCatHighScores')) || [];
+let tapX = null;
+let tapY = null;
+let tapOpacity = 0;
+
+const tapSound = document.getElementById('tapSound');
+
+function playTapSound() {
+    tapSound.currentTime = 0;
+    tapSound.play().catch(error => console.log('Audio play failed:', error));
+}
+
+const cat = {
+    x: 50,
+    y: 0,
+    width: 40,
+    height: 30,
+    velocity: 0,
+    gravity: 0.4,
+    jump: -7
+};
+
+let blinkTimer = 0;
+let isBlinking = false;
+
+const pipes = [];
+let score = 0;
+let gameOver = false;
+
+// Background elements
+const bg = {
+    sky: {
+        gradient: ctx.createLinearGradient(0, 0, 0, canvas.height),
+    },
+    clouds: [],
+    buildings: [],
+};
+
+function initBackground() {
+    bg.sky.gradient.addColorStop(0, '#87CEEB');
+    bg.sky.gradient.addColorStop(1, '#E0F6FF');
+
+    for (let i = 0; i < 5; i++) {
+        bg.clouds.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height / 2,
+            width: Math.random() * 60 + 40,
+            height: Math.random() * 30 + 20,
+            speed: Math.random() * 0.3 + 0.1
+        });
+    }
+
+    for (let i = 0; i < 6; i++) {
+        bg.buildings.push({
+            x: i * 70,
+            y: canvas.height,
+            width: 60,
+            height: Math.random() * 200 + 100
+        });
+    }
+}
+
+function drawBackground() {
+    ctx.fillStyle = bg.sky.gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    bg.clouds.forEach(cloud => {
+        ctx.beginPath();
+        ctx.ellipse(cloud.x, cloud.y, cloud.width / 2, cloud.height / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.fillStyle = '#4a4a4a';
+    bg.buildings.forEach(building => {
+        ctx.fillRect(building.x, canvas.height - building.height, building.width, building.height);
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 5; j++) {
+                ctx.fillRect(building.x + 10 + i * 20, canvas.height - building.height + 10 + j * 40, 10, 20);
+            }
+        }
+        ctx.fillStyle = '#4a4a4a';
+    });
+}
+
+function updateBackground() {
+    bg.clouds.forEach(cloud => {
+        cloud.x -= cloud.speed;
+        if (cloud.x + cloud.width < 0) {
+            cloud.x = canvas.width;
+            cloud.y = Math.random() * canvas.height / 2;
+        }
+    });
+
+    bg.buildings.forEach(building => {
+        building.x -= 0.5;
+        if (building.x + building.width < 0) {
+            building.x = canvas.width;
+            building.height = Math.random() * 200 + 100;
+        }
+    });
+}
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    adjustGameElements();
+}
+
+function adjustGameElements() {
+    cat.y = canvas.height / 2;
+
+    const gap = canvas.height * 0.28; 
+    const minHeight = canvas.height * 0.1; 
+    const maxHeight = canvas.height - gap - minHeight;
+
+    pipes.forEach(pipe => {
+        if (pipe.y === 0) {
+            pipe.height = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+        } else {
+            pipe.y = pipe.height + gap;
+            pipe.height = canvas.height - pipe.y;
+        }
+    });
+}
+
+function startGame() {
+    mainMenu.style.display = 'none';
+    gameOverMenu.style.display = 'none';
+    canvas.style.display = 'block';
+    resizeCanvas();
+    resetGame();
+    gameLoop();
+}
+
+function resetGame() {
+    cat.y = canvas.height / 2;
+    cat.velocity = 0;
+    pipes.length = 0;
+    score = 0;
+    gameOver = false;
+    createPipe();
+    initBackground();
+}
+
+function drawCat() {
+    ctx.fillStyle = '#FFA500';
+    
+    ctx.beginPath();
+    ctx.ellipse(cat.x + cat.width / 2, cat.y + cat.height / 2, cat.width / 2, cat.height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.moveTo(cat.x, cat.y);
+    ctx.lineTo(cat.x + 10, cat.y - 15);
+    ctx.lineTo(cat.x + 20, cat.y);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.moveTo(cat.x + cat.width, cat.y);
+    ctx.lineTo(cat.x + cat.width - 10, cat.y - 15);
+    ctx.lineTo(cat.x + cat.width - 20, cat.y);
+    ctx.fill();
+    
+    ctx.fillStyle = '#000';
+    if (!isBlinking) {
+        ctx.beginPath();
+        ctx.arc(cat.x + cat.width * 0.3, cat.y + cat.height * 0.3, 3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.arc(cat.x + cat.width * 0.7, cat.y + cat.height * 0.3, 3, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(cat.x + cat.width * 0.2, cat.y + cat.height * 0.3);
+        ctx.lineTo(cat.x + cat.width * 0.4, cat.y + cat.height * 0.3);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(cat.x + cat.width * 0.6, cat.y + cat.height * 0.3);
+        ctx.lineTo(cat.x + cat.width * 0.8, cat.y + cat.height * 0.3);
+        ctx.stroke();
+    }
+    
+    ctx.fillStyle = '#FF6347';
+    ctx.beginPath();
+    ctx.moveTo(cat.x + cat.width, cat.y + cat.height * 0.6);
+    ctx.lineTo(cat.x + cat.width + 10, cat.y + cat.height * 0.5);
+    ctx.lineTo(cat.x + cat.width, cat.y + cat.height * 0.4);
+    ctx.fill();
+    
+    ctx.strokeStyle = '#000';
+    ctx.beginPath();
+    ctx.moveTo(cat.x + cat.width * 0.8, cat.y + cat.height * 0.5);
+    ctx.lineTo(cat.x + cat.width * 1.2, cat.y + cat.height * 0.4);
+    ctx.moveTo(cat.x + cat.width * 0.8, cat.y + cat.height * 0.6);
+    ctx.lineTo(cat.x + cat.width * 1.2, cat.y + cat.height * 0.7);
+    ctx.stroke();
+}
+
+function createPipe() {
+    const gap = canvas.height * 0.28; 
+    const pipeWidth = canvas.width * 0.15; 
+    const minHeight = canvas.height * 0.1; 
+    const maxHeight = canvas.height - gap - minHeight;
+    const height = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+
+    pipes.push({
+        x: canvas.width,
+        y: 0,
+        width: pipeWidth,
+        height: height,
+        passed: false
+    });
+
+    pipes.push({
+        x: canvas.width,
+        y: height + gap,
+        width: pipeWidth,
+        height: canvas.height - height - gap,
+        passed: false
+    });
+}
+
+function drawPipes() {
+    ctx.fillStyle = '#00A86B';
+    pipes.forEach(pipe => {
+        ctx.fillRect(pipe.x, pipe.y, pipe.width, pipe.height);
+    });
+}
+
+function movePipes() {
+    pipes.forEach(pipe => {
+        pipe.x -= 1.5;
+    });
+
+    if (pipes[0].x < -pipes[0].width) {
+        pipes.shift();
+        pipes.shift();
+        score++;
+    }
+
+    if (pipes[pipes.length - 1].x < canvas.width - 200) {
+        createPipe();
+    }
+}
+
+function checkCollision() {
+    const catRight = cat.x + cat.width;
+    const catBottom = cat.y + cat.height;
+
+    for (let i = 0; i < pipes.length; i++) {
+        const pipe = pipes[i];
+        if (
+            catRight > pipe.x &&
+            cat.x < pipe.x + pipe.width &&
+            (cat.y < pipe.y + pipe.height && catBottom > pipe.y)
+        ) {
+            gameOver = true;
+            return;
+        }
+    }
+
+    if (cat.y + cat.height > canvas.height || cat.y < 0) {
+        gameOver = true;
+    }
+}
+
+function drawScore() {
+    ctx.fillStyle = '#000';
+    ctx.font = '24px Comic Sans MS';
+    ctx.fillText(`Score: ${score}`, 10, 30);
+}
+
+function drawTapIndicator() {
+    if (tapOpacity > 0) {
+        ctx.beginPath();
+        ctx.arc(tapX, tapY, 20, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${tapOpacity})`;
+        ctx.fill();
+        tapOpacity -= 0.05;
+    }
+}
+
+function updateBlink() {
+    blinkTimer++;
+    if (blinkTimer > 120) {
+        isBlinking = true;
+        if (blinkTimer > 126) {
+            isBlinking = false;
+            blinkTimer = 0;
+        }
+    }
+}
+
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!gameOver) {
+        drawBackground();
+        updateBackground();
+        
+        cat.velocity += cat.gravity;
+        cat.y += cat.velocity;
+
+        updateBlink();
+        drawCat();
+        drawPipes();
+        movePipes();
+        checkCollision();
+        drawScore();
+        drawTapIndicator();
+
+        requestAnimationFrame(gameLoop);
+    } else {
+        endGame();
+    }
+}
+
+function endGame() {
+    canvas.style.display = 'none';
+    gameOverMenu.style.display = 'block';
+    finalScoreSpan.textContent = score;
+
+    updateHighScores();
+
+    highScoreSpan.textContent = highScores[0] || 0;
+}
+
+function updateHighScores() {
+    highScores.push(score);
+    highScores.sort((a, b) => b - a);
+    highScores = highScores.slice(0, 5);
+
+    localStorage.setItem('flappyCatHighScores', JSON.stringify(highScores));
+    displayHighScores();
+}
+
+function displayHighScores() {
+    scoreList.innerHTML = '';
+    highScores.forEach((score, index) => {
+        const li = document.createElement('li');
+        li.textContent = `${index + 1}. ${score}`;
+        scoreList.appendChild(li);
+    });
+}
+
+function jump(event) {
+    if (gameOver) {
+        resetGame();
+        gameLoop();
+    } else {
+        cat.velocity = cat.jump;
+    }
+    
+    playTapSound();
+    
+    if (event.type === 'click') {
+        tapX = event.clientX - canvas.offsetLeft;
+        tapY = event.clientY - canvas.offsetTop;
+    } else if (event.type === 'touchstart') {
+        tapX = event.touches[0].clientX - canvas.offsetLeft;
+        tapY = event.touches[0].clientY - canvas.offsetTop;
+    }
+    tapOpacity = 1;
+}
+
+canvas.addEventListener('click', jump);
+canvas.addEventListener('touchstart', jump);
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+        jump({ type: 'click', clientX: cat.x, clientY: cat.y });
+    }
+});
+
+startButton.addEventListener('click', startGame);
+restartButton.addEventListener('click', startGame);
+mainMenuButton.addEventListener('click', () => {
+    gameOverMenu.style.display = 'none';
+    mainMenu.style.display = 'block';
+});
+
+// Animate the cat in the main menu
+const catSvg = document.getElementById('catSvg');
+let catY = 0;
+let catDirection = 1;
+
+function animateMenuCat() {
+    catY += catDirection * 0.5;
+    if (catY > 10 || catY < -10) {
+        catDirection *= -1;
+    }
+    catSvg.style.transform = `translateY(${catY}px)`;
+    requestAnimationFrame(animateMenuCat);
+}
+
+animateMenuCat();
+displayHighScores();
+window.addEventListener('resize', resizeCanvas);
+</script>
+</body>
+</html>
